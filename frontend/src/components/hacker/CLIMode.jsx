@@ -35,7 +35,7 @@ const ROOT_HELP_TEXT = `
 ║  ops            — Alias for classified                   ║
 ╚═══════════════════════════════════════════════════════════╝`
 
-export default function CLIMode({ onSwitchView, onExit, isRoot, onRootEscalation }) {
+export default function CLIMode({ onSwitchView, onExit, isRoot, onRootEscalation, playClick }) {
   const prompt = isRoot ? 'root@security-core:~#' : 'baakaa@security-core:~$'
 
   const [history, setHistory] = useState([
@@ -283,6 +283,7 @@ export default function CLIMode({ onSwitchView, onExit, isRoot, onRootEscalation
   }, [appendLines, onSwitchView, onExit, isRoot, onRootEscalation, prompt])
 
   const handleKeyDown = useCallback((e) => {
+    playClick?.()
     if (e.key === 'Enter') {
       const val = input
       setCmdHistory(h => [val, ...h].slice(0, 50))

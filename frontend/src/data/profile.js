@@ -47,8 +47,8 @@ export const PROFILE = {
     "and automate workflows. When I'm not building, I'm breaking — ethically.",
 
   aboutSystem:
-    "This portfolio is a dual-interface AI-engineered platform. The AI assistant was engineered " +
-    "to collaborate directly with 'baakaa' to craft a bulletproof low-level frontend skin over " +
+    "This portfolio is a dual-interface custom-engineered platform. It was designed " +
+    "and developed by 'baakaa' to craft a bulletproof low-level frontend skin over " +
     "a Python FastAPI pipeline. One canonical data source powers both the Clean UI and the Terminal — " +
     "update once, both views reflect instantly. Stack: React JSX + Python FastAPI + Three.js + OpenPGP.js.",
 
@@ -177,7 +177,7 @@ export const PROFILE = {
       title: "Terminal Portfolio Core",
       subtitle: "Immersive Dual-Skin Interactive Portfolio Shell",
       description:
-        "This very portfolio — a dual-interface AI-engineered web application featuring " +
+        "This very portfolio — a dual-interface custom-engineered web application featuring " +
         "a baakaa OS bootloader, interactive CLI terminal, automated View Mode dashboard, " +
         "ASCII globe, 3D Three.js project globe, PGP contact form, and CVE-style resume download.",
       tech: ["React JSX", "Python FastAPI", "Three.js", "OpenPGP.js", "Framer Motion"],

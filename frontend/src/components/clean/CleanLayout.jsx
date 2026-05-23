@@ -47,8 +47,8 @@ function AboutSystem() {
             About the <span className="gradient-text">System</span>
           </h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '1.0625rem', lineHeight: 1.75, marginBottom: '1.5rem', maxWidth: 580 }}>
-            This isn't an ordinary portfolio. It's an AI-engineered dual-interface platform
-            built in direct collaboration with <strong>baakaa</strong>.
+            This isn't an ordinary portfolio. It's a custom-engineered dual-interface platform
+            built and crafted entirely by <strong>baakaa</strong>.
           </p>
 
           <button

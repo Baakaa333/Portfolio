@@ -136,7 +136,7 @@ const PACKET_TEMPLATES = [
         { key: 'Status', val: 'Live' },
         { key: 'Stack', val: 'React JSX + Python FastAPI + Three.js + OpenPGP.js' },
         { key: 'Features', val: 'Tor boot, draggable terminal, CLI shell, packet capture, 3D globe' },
-        { key: 'Description', val: 'A dual-interface AI-engineered web application featuring baakaa OS bootloader, interactive terminal, live packet capture stream, and CVE-style resume download.' },
+        { key: 'Description', val: 'A dual-interface custom-engineered web application featuring baakaa OS bootloader, interactive terminal, live packet capture stream, and CVE-style resume download.' },
       ],
     },
   },

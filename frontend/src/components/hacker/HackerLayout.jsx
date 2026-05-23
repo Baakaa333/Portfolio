@@ -1,55 +1,81 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import CLIMode from './CLIMode'
 import PacketCapture from './PacketCapture'
-import SystemHealthPane from './SystemHealthPane'
+import GlobeCanvas from './GlobeCanvas'
+import LiveTerminalStream from './LiveTerminalStream'
+import TerminalSidebar from './TerminalSidebar'
+import MatrixRain from './MatrixRain'
+import { useAudio } from '../../hooks/useAudio'
 
-// ── Box-drawing pane label ──────────────────────────────────────────────────
-const PaneBar = ({ left, title, right, borderColor = '#330000' }) => (
+// ── Uptime counter ────────────────────────────────────────────────────────────
+function useUptime() {
+  const [s, setS] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setS(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const h = String(Math.floor(s / 3600)).padStart(2, '0')
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+  const sec = String(s % 60).padStart(2, '0')
+  return `${h}:${m}:${sec}`
+}
+
+// ── Thin section divider ──────────────────────────────────────────────────────
+const HLine = ({ color = '#0e1e1a', label, labelColor = '#1a5540' }) => (
   <div style={{
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '0.6875rem',
-    color: borderColor,
-    display: 'flex',
-    alignItems: 'center',
-    whiteSpace: 'pre',
-    flexShrink: 0,
-    lineHeight: 1,
+    flexShrink: 0, display: 'flex', alignItems: 'center',
+    fontFamily: "'JetBrains Mono',monospace", fontSize: '0.6rem',
+    color, lineHeight: 1, whiteSpace: 'pre', userSelect: 'none',
   }}>
-    <span>{left}</span>
-    {title && (
-      <>
-        <span style={{ color: '#661111', padding: '0 0.375rem' }}>{title}</span>
-      </>
-    )}
-    <span style={{ flex: 1 }}>{right}</span>
+    <span>├</span>
+    <span style={{ color }}>{`─`.repeat(4)}</span>
+    {label && <span style={{ color: labelColor, padding: '0 0.375rem' }}>{label}</span>}
+    <span style={{ flex: 1, color }}>{`─`.repeat(60)}</span>
+    <span>┤</span>
   </div>
 )
 
-// ── Vertical border column ──────────────────────────────────────────────────
-const VBorder = () => (
+// ── Pane header bar ───────────────────────────────────────────────────────────
+const PaneBar = ({ title, right, accent = '#1a5540' }) => (
   <div style={{
-    width: '1ch',
-    background: '#000',
-    color: '#330000',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '0.6875rem',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    overflow: 'hidden',
-    flexShrink: 0,
-    userSelect: 'none',
-    lineHeight: 1.3,
+    flexShrink: 0, display: 'flex', alignItems: 'center',
+    padding: '0.15rem 0.5rem', borderBottom: '1px solid #0a1e18',
+    background: '#020808', fontFamily: "'JetBrains Mono',monospace",
+    fontSize: '0.6rem', gap: '0.5rem', whiteSpace: 'nowrap',
   }}>
-    {Array.from({ length: 200 }).map((_, i) => <span key={i}>│</span>)}
+    <span style={{ color: '#0e2a22' }}>┌─</span>
+    <span style={{ color: accent }}>{title}</span>
+    <span style={{ flex: 1, color: '#081410' }}>{'─'.repeat(20)}</span>
+    {right && <span style={{ color: '#0e2a22' }}>{right}</span>}
+    <span style={{ color: '#0e2a22' }}>─┐</span>
   </div>
 )
+
+// ── View mode toggle button ───────────────────────────────────────────────────
+const VMBtn = ({ active, onClick, children }) => (
+  <button onClick={onClick} style={{
+    fontFamily: "'JetBrains Mono',monospace", fontSize: '0.55rem',
+    background: active ? 'rgba(0,255,200,0.08)' : 'transparent',
+    border: `1px solid ${active ? 'rgba(0,255,200,0.35)' : '#0e2a22'}`,
+    borderRadius: 3, padding: '0.15rem 0.5rem',
+    color: active ? '#00ffe0' : '#1a5040',
+    cursor: 'pointer', transition: 'all 150ms',
+  }}>{children}</button>
+)
+
+// ── VIEW MODES ────────────────────────────────────────────────────────────────
+// 'globe'  — GlobeCanvas (top 45%) + LiveTerminalStream (bottom 55%)
+// 'stream' — Full-height LiveTerminalStream
+// 'legacy' — Original SystemHealthPane layout
 
 export default function HackerLayout({ onExit }) {
-  const [isRoot, setIsRoot] = useState(false)
-  const [pane3Height, setPane3Height] = useState(38) // % of total height
+  const [isRoot,   setIsRoot]   = useState(false)
+  const [viewMode, setViewMode] = useState('globe')
+  const [targeted, setTargeted] = useState(null)
+  const uptime = useUptime()
+  const { audioEnabled, toggleAudio, playClick } = useAudio()
 
-  // ── Global sudo su listener (passed down via prop) ──────────────────────
+  // sudo su key-listener (outside CLI input)
   const [typedBuf, setTypedBuf] = useState('')
   const bufRef = useRef('')
   const TARGET = 'sudo su'
@@ -58,11 +84,7 @@ export default function HackerLayout({ onExit }) {
     const onKey = (e) => {
       if (isRoot) return
       const tag = document.activeElement?.tagName
-      // allow typing in the cli input
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        // still track — CLIMode handles its own sudo su
-        return
-      }
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
       const ch = e.key
       if (ch.length !== 1) return
       bufRef.current += ch
@@ -76,21 +98,45 @@ export default function HackerLayout({ onExit }) {
         bufRef.current = bufRef.current.slice(-TARGET.length)
         setTypedBuf(TARGET.startsWith(bufRef.current) ? bufRef.current : '')
       }
-      if (bufRef.current === TARGET) {
-        setTimeout(() => setIsRoot(true), 300)
-      }
+      if (bufRef.current === TARGET) setTimeout(() => setIsRoot(true), 300)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isRoot])
 
-  // ── Top row dimensions ───────────────────────────────────────────────────
-  const topH = `${100 - pane3Height}%`
-  const botH = `${pane3Height}%`
+  const handleNodeClick = useCallback((node) => {
+    setTargeted(n => n === node.id ? null : node.id)
+  }, [])
 
-  const topBarTitle = isRoot
-    ? '[ root@security-core — PRIVILEGED SHELL ]'
-    : '[ baakaa@security-core — INTERACTIVE SHELL ]'
+  // ── Left pane content based on viewMode ──────────────────────────────────
+  const LeftContent = () => {
+    if (viewMode === 'stream') {
+      return (
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          <MatrixRain />
+          <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
+            <LiveTerminalStream />
+          </div>
+        </div>
+      )
+    }
+    // 'globe' mode — globe top, stream bottom
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Globe */}
+        <div style={{ height: '42%', flexShrink: 0, position: 'relative', borderBottom: '1px solid #0a1e18' }}>
+          <GlobeCanvas targetedNode={targeted} onNodeClick={handleNodeClick} />
+        </div>
+        {/* Live stream below globe */}
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          <MatrixRain />
+          <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
+            <LiveTerminalStream />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{
@@ -99,150 +145,213 @@ export default function HackerLayout({ onExit }) {
       fontFamily: "'JetBrains Mono', monospace",
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden',
-      color: '#ff0000',
+      color: '#00ffe0',
     }}>
+      {/* CRT flicker sweep — horizontal glow bar drifts top→bottom every 7s */}
+      <div className="flicker-sweep" />
 
-      {/* ══ OUTER TOP BORDER ════════════════════════════════════════════════ */}
-      <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', lineHeight: 1, whiteSpace: 'pre', display: 'flex', alignItems: 'center' }}>
-        {'┌'}
-        <span style={{ color: '#550000' }}>{'─'.repeat(8)}</span>
-        <span style={{ color: '#880000', padding: '0 0.25rem' }}>[ baakaa OS v2.026 — 🧅 baakaa777xr3p4qzm9y2kwd81c3.onion ]</span>
-        <span style={{ color: '#550000', flex: 1 }}>{'─'.repeat(40)}</span>
-        <span style={{ color: '#440000', paddingRight: '0.5rem' }}>
-          {isRoot ? '[ ⚡ ROOT ]' : '[ user ]'}
+      {/* ══ OUTER TOP BORDER ══════════════════════════════════════════════════ */}
+      <div style={{
+        flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem',
+        lineHeight: 1, whiteSpace: 'pre', display: 'flex', alignItems: 'center',
+        fontFamily: "'JetBrains Mono',monospace",
+      }}>
+        <span>┌</span>
+        <span style={{ color: '#0e2a22' }}>{'─'.repeat(6)}</span>
+        <span style={{ color: '#00ffe0', padding: '0 0.35rem', textShadow: '0 0 10px #00ffe088' }}>
+          [ baakaa OS v2.026 — 🧅 baakaa777xr3p4qzm9y2kwd81c3.onion ]
         </span>
-        <button
-          onClick={onExit}
-          style={{ background: 'none', border: '1px solid #330000', color: '#550000', fontFamily: 'inherit', fontSize: '0.6rem', cursor: 'pointer', padding: '0 0.375rem', lineHeight: 1.6 }}
+        <span style={{ flex: 1, color: '#0a1e18' }}>{'─'.repeat(30)}</span>
+        <button onClick={onExit} style={{
+          background: 'none', border: '1px solid #0e2a22', color: '#1a5040',
+          fontFamily: 'inherit', fontSize: '0.55rem', cursor: 'pointer',
+          padding: '0 0.375rem', lineHeight: 1.6, marginRight: '0.25rem',
+          transition: 'all 150ms',
+        }}
+          onMouseEnter={e => { e.target.style.borderColor='#ff4444'; e.target.style.color='#ff4444' }}
+          onMouseLeave={e => { e.target.style.borderColor='#0e2a22'; e.target.style.color='#1a5040' }}
         >[exit]</button>
-        {'┐'}
+        <span>┐</span>
       </div>
 
-      {/* ══ TOP ROW (Pane 1 + Pane 2) ═══════════════════════════════════════ */}
-      <div style={{ display: 'flex', height: topH, overflow: 'hidden', flexShrink: 0 }}>
+      {/* ══ STICKY SESSION HEADER ═════════════════════════════════════════════ */}
+      <div style={{
+        flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: '0.75rem',
+        padding: '0.25rem 0.75rem',
+        background: '#020c0a',
+        borderBottom: '1px solid #0a1e18',
+        fontFamily: "'JetBrains Mono',monospace",
+        fontSize: '0.6rem',
+        flexWrap: 'wrap',
+      }}>
+        {/* Session info */}
+        <span style={{ color: '#1a5040' }}>SESSION:</span>
+        <span style={{ color: isRoot ? '#ff4444' : '#00ffe0', textShadow: '0 0 6px currentColor' }}>
+          {isRoot ? 'root@node-7' : 'ghost@node-7'}
+        </span>
+        <span style={{ color: '#0a1e18' }}>│</span>
+        <span style={{ color: '#1a5040' }}>UPTIME:</span>
+        <span style={{ color: '#22d3ee' }}>{uptime}</span>
+        <span style={{ color: '#0a1e18' }}>│</span>
+        <span style={{ color: '#1a5040' }}>CONN:</span>
+        <span style={{ color: '#00ff41', textShadow: '0 0 6px #00ff4155' }}>ENCRYPTED</span>
+        <span style={{ color: '#0a1e18' }}>│</span>
+        {isRoot && (
+          <>
+            <span style={{ color: '#ff2222', textShadow: '0 0 8px #ff0000', animation: 'blink 0.8s step-end infinite' }}>
+              ⚡ ROOT
+            </span>
+            <span style={{ color: '#0a1e18' }}>│</span>
+          </>
+        )}
 
-        {/* ── Left border ─────────────────────────────────────────────────── */}
-        <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', alignItems: 'center', overflow: 'hidden' }}>
+        {/* View mode toggles */}
+        <div style={{ display: 'flex', gap: '0.25rem', marginLeft: 'auto' }}>
+          <VMBtn active={viewMode==='globe'}  onClick={()=>setViewMode('globe')}>GLOBE</VMBtn>
+          <VMBtn active={viewMode==='stream'} onClick={()=>setViewMode('stream')}>STREAM</VMBtn>
+        </div>
+
+        {/* Audio toggle */}
+        <button onClick={toggleAudio} style={{
+          fontFamily: 'inherit', fontSize: '0.55rem',
+          background: audioEnabled ? 'rgba(0,255,65,0.06)' : 'transparent',
+          border: `1px solid ${audioEnabled ? 'rgba(0,255,65,0.25)' : '#0e2a22'}`,
+          borderRadius: 3, padding: '0.15rem 0.5rem',
+          color: audioEnabled ? '#00ff41' : '#1a5040',
+          cursor: 'pointer', transition: 'all 150ms',
+        }}>
+          {audioEnabled ? '🔊 SFX' : '🔇 SFX'}
+        </button>
+      </div>
+
+      {/* ══ TOP ROW: LEFT (Globe+Stream) + RIGHT (CLI + Sidebar) ══════════════ */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
+
+        {/* ── LEFT BORDER ─────────────────────────────────────────────────── */}
+        <div style={{ flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem', display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
           {Array.from({ length: 200 }).map((_, i) => <div key={i} style={{ lineHeight: 1.3 }}>│</div>)}
         </div>
 
-        {/* ── PANE 1: TOR GATEWAY / SYSTEM HEALTH (30%) ───────────────────── */}
-        <div style={{ width: '30%', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
-          {/* Pane 1 top bar */}
-          <div style={{ flexShrink: 0, fontSize: '0.6rem', color: '#441111', display: 'flex', alignItems: 'center', borderBottom: '1px solid #1a0000', padding: '0.125rem 0.5rem', whiteSpace: 'nowrap', background: '#020000' }}>
-            <span style={{ color: '#550000' }}>┌─</span>
-            <span style={{ color: '#7c3aed', padding: '0 0.25rem' }}>[ TOR GATEWAY ]</span>
-            <span style={{ flex: 1, color: '#1a0000' }}>{'─'.repeat(20)}</span>
-            <span style={{ color: '#330000' }}>[ pane:1 ]─┐</span>
-          </div>
-          {/* Pane 1 content */}
-          <div style={{ flex: 1, overflow: 'hidden', padding: '0.25rem 0.375rem' }}>
-            <SystemHealthPane />
-          </div>
+        {/* ── LEFT PANE (60%) ──────────────────────────────────────────────── */}
+        <div style={{ width: '60%', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
+          <PaneBar
+            title={viewMode === 'stream' ? '[ LIVE INTEL STREAM — ghost@node-7 ]' : '[ GLOBE + LIVE STREAM ]'}
+            right={`[ pane:L ]`}
+            accent="#00ffe0"
+          />
+          <LeftContent />
         </div>
 
-        {/* ── Vertical divider ─────────────────────────────────────────────── */}
-        <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none' }}>
-          <div style={{ color: '#441111', lineHeight: 1 }}>┼</div>
+        {/* ── VERTICAL DIVIDER ─────────────────────────────────────────────── */}
+        <div style={{ flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem', display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
+          <div style={{ color: '#0e2a22', lineHeight: 1 }}>┼</div>
           {Array.from({ length: 200 }).map((_, i) => <div key={i} style={{ lineHeight: 1.3 }}>│</div>)}
         </div>
 
-        {/* ── PANE 2: INTERACTIVE CLI (70%) ────────────────────────────────── */}
+        {/* ── RIGHT PANE (40%) ─────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Pane 2 top bar */}
-          <div style={{ flexShrink: 0, fontSize: '0.6rem', color: '#441111', display: 'flex', alignItems: 'center', borderBottom: '1px solid #1a0000', padding: '0.125rem 0.5rem', background: '#020000', whiteSpace: 'nowrap' }}>
-            <span style={{ color: '#550000' }}>┌─</span>
-            <span style={{ color: isRoot ? '#ff0033' : '#cc2222', padding: '0 0.25rem' }}>{topBarTitle}</span>
-            <span style={{ flex: 1, color: '#1a0000' }}>{'─'.repeat(10)}</span>
-            <span style={{ color: '#330000' }}>[ pane:2 ]─┐</span>
-          </div>
 
-          {/* Sudo su guide block — always visible in pane header */}
-          <div style={{ flexShrink: 0, borderBottom: '1px solid #1a0000', padding: '0.5rem 1rem 0.375rem', background: '#000', fontFamily: "'JetBrains Mono',monospace", fontSize: '0.7rem' }}>
-            <div style={{ color: '#441111' }}>$ system --scan</div>
-            <div style={{ color: '#882222' }}>Hidden mode detected.</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <span style={{ color: '#ff2222', animation: 'blink 0.85s step-end infinite' }}>●</span>
-              <span style={{ color: '#cc0000', fontWeight: 700, letterSpacing: '0.04em' }}>ROOT ACCESS AVAILABLE</span>
-            </div>
-            <div style={{ color: '#550000', marginTop: '0.25rem', letterSpacing: '0.1em', fontSize: '0.625rem' }}>UNLOCK SEQUENCE:</div>
-
-            {/* Live sudo su fill-in */}
-            <div style={{ marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '1rem', fontWeight: 700, letterSpacing: '0.12em' }}>
-              <span style={{ color: '#440000' }}>$</span>
-              <span style={{ color: isRoot ? '#00ff41' : '#ff0000', textShadow: isRoot ? '0 0 12px rgba(0,255,65,0.5)' : '0 0 16px rgba(255,0,0,0.7)' }}>
-                {isRoot ? 'sudo su' : (
-                  <>
-                    <span style={{ color: '#00ff41' }}>{typedBuf}</span>
-                    <span style={{ color: '#550000' }}>{TARGET.slice(typedBuf.length)}</span>
-                  </>
-                )}
-              </span>
-              {!isRoot && (
-                <span style={{ color: '#ff0000', animation: 'blink 0.9s step-end infinite' }}>█</span>
-              )}
-              {isRoot && <span style={{ color: '#00ff41', fontSize: '0.75rem' }}> ✓ ESCALATED</span>}
-            </div>
-            <div style={{ color: '#330000', fontSize: '0.6rem', marginTop: '0.25rem' }}>
-              Type anywhere on the page. No button. No click. Just type.
-            </div>
-          </div>
-
-          {/* CLI shell */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <CLIMode
-              onSwitchView={() => {}}
-              onExit={onExit}
-              isRoot={isRoot}
-              onRootEscalation={() => setIsRoot(true)}
+          {/* Right pane top: CLI shell */}
+          <div style={{ height: '62%', flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderBottom: '1px solid #0a1e18' }}>
+            <PaneBar
+              title={isRoot ? '[ root@security-core — PRIVILEGED SHELL ]' : '[ baakaa@security-core — INTERACTIVE SHELL ]'}
+              right="[ pane:R ]"
+              accent={isRoot ? '#ff4444' : '#22d3ee'}
             />
+
+            {/* sudo su unlock hint */}
+            <div style={{
+              flexShrink: 0, borderBottom: '1px solid #0a1e18',
+              padding: '0.375rem 0.75rem 0.3rem',
+              background: '#000', fontSize: '0.6rem',
+            }}>
+              <div style={{ color: '#0e2a22' }}>$ system --scan</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.15rem' }}>
+                <span style={{ color: '#ff2222', animation: 'blink 0.85s step-end infinite' }}>●</span>
+                <span style={{ color: '#cc0000', fontWeight: 700, letterSpacing: '0.04em' }}>
+                  ROOT ACCESS AVAILABLE
+                </span>
+              </div>
+              <div style={{ marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.9rem', fontWeight: 700, letterSpacing: '0.1em' }}>
+                <span style={{ color: '#330000' }}>$</span>
+                <span style={{ color: isRoot ? '#00ff41' : '#ff0000', textShadow: isRoot ? '0 0 12px rgba(0,255,65,0.5)' : '0 0 14px rgba(255,0,0,0.6)' }}>
+                  {isRoot ? 'sudo su' : (
+                    <>
+                      <span style={{ color: '#00ff41' }}>{typedBuf}</span>
+                      <span style={{ color: '#440000' }}>{TARGET.slice(typedBuf.length)}</span>
+                    </>
+                  )}
+                </span>
+                {!isRoot && <span style={{ color: '#ff0000', animation: 'blink 0.9s step-end infinite' }}>█</span>}
+                {isRoot && <span style={{ color: '#00ff41', fontSize: '0.7rem' }}> ✓ ESCALATED</span>}
+              </div>
+              <div style={{ color: '#1a0000', fontSize: '0.55rem', marginTop: '0.15rem' }}>
+                Type anywhere · no click · just type.
+              </div>
+            </div>
+
+            {/* CLI */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <CLIMode
+                onSwitchView={() => setViewMode('stream')}
+                onExit={onExit}
+                isRoot={isRoot}
+                onRootEscalation={() => setIsRoot(true)}
+                playClick={playClick}
+              />
+            </div>
+          </div>
+
+          {/* Right pane bottom: sidebar metrics */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <PaneBar title="[ SYS METRICS — LIVE ]" right="[ pane:S ]" accent="#8b5cf6" />
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <TerminalSidebar />
+            </div>
           </div>
         </div>
 
-        {/* ── Right border ─────────────────────────────────────────────────── */}
-        <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* ── RIGHT BORDER ─────────────────────────────────────────────────── */}
+        <div style={{ flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem', display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
           {Array.from({ length: 200 }).map((_, i) => <div key={i} style={{ lineHeight: 1.3 }}>│</div>)}
         </div>
       </div>
 
-      {/* ══ MIDDLE DIVIDER (Pane 2/3 separator) ═════════════════════════════ */}
-      <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', lineHeight: 1, whiteSpace: 'pre', display: 'flex', alignItems: 'center' }}>
-        {'├'}
-        <span style={{ color: '#1a0000' }}>{'─'.repeat(8)}</span>
-        <span style={{ color: '#4b1082', padding: '0 0.25rem' }}>[ PACKET CAPTURE — eth0 LIVE ]</span>
-        <span style={{ color: '#1a0000', flex: 1 }}>{'─'.repeat(10)}</span>
-        <span style={{ color: '#06b6d4', padding: '0 0.25rem' }}>FLUTTER</span>
-        <span style={{ color: '#1a0000' }}>─</span>
-        <span style={{ color: '#ff0033', padding: '0 0.25rem' }}>SEC</span>
-        <span style={{ color: '#1a0000' }}>─</span>
-        <span style={{ color: '#10b981', padding: '0 0.25rem' }}>AI_ML</span>
-        <span style={{ color: '#1a0000' }}>─</span>
-        <span style={{ color: '#f59e0b', padding: '0 0.25rem' }}>CMS</span>
-        <span style={{ color: '#1a0000' }}>{'─'.repeat(8)}</span>
-        {'┤'}
-      </div>
+      {/* ══ PACKET CAPTURE SEPARATOR ══════════════════════════════════════════ */}
+      <HLine
+        label="[ PACKET CAPTURE — eth0 LIVE ]"
+        labelColor="#7c3aed"
+        color="#0a1e18"
+      />
 
-      {/* ══ PANE 3: PACKET CAPTURE (bottom) ═════════════════════════════════ */}
-      <div style={{ height: botH, display: 'flex', overflow: 'hidden', flexShrink: 0 }}>
-        <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ══ PACKET CAPTURE PANE ═══════════════════════════════════════════════ */}
+      <div style={{ height: '30%', display: 'flex', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem', display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
           {Array.from({ length: 200 }).map((_, i) => <div key={i} style={{ lineHeight: 1.3 }}>│</div>)}
         </div>
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <PacketCapture />
         </div>
-        <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem', display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
           {Array.from({ length: 200 }).map((_, i) => <div key={i} style={{ lineHeight: 1.3 }}>│</div>)}
         </div>
       </div>
 
-      {/* ══ OUTER BOTTOM BORDER ═════════════════════════════════════════════ */}
-      <div style={{ flexShrink: 0, color: '#330000', fontSize: '0.6875rem', lineHeight: 1, whiteSpace: 'pre', display: 'flex', alignItems: 'center' }}>
-        {'└'}
-        <span style={{ color: '#1a0000' }}>{'─'.repeat(10)}</span>
-        <span style={{ color: '#441111', padding: '0 0.25rem' }}>[ baakaa portfolio | prajwalch75@gmail.com | github.com/Baakaa333 ]</span>
-        <span style={{ color: '#1a0000', flex: 1 }}>{'─'.repeat(20)}</span>
-        <span style={{ color: '#330000', padding: '0 0.25rem' }}>[ PID:2026 | TTY:pts/0 ]</span>
-        {'┘'}
+      {/* ══ OUTER BOTTOM BORDER ═══════════════════════════════════════════════ */}
+      <div style={{
+        flexShrink: 0, color: '#0a1e18', fontSize: '0.6rem',
+        lineHeight: 1, whiteSpace: 'pre', display: 'flex', alignItems: 'center',
+        fontFamily: "'JetBrains Mono',monospace",
+      }}>
+        <span>└</span>
+        <span>{'─'.repeat(8)}</span>
+        <span style={{ color: '#1a5040', padding: '0 0.25rem' }}>
+          [ baakaa | prajwalch75@gmail.com | github.com/Baakaa333 ]
+        </span>
+        <span style={{ flex: 1 }}>{'─'.repeat(20)}</span>
+        <span style={{ color: '#1a5040', padding: '0 0.25rem' }}>[ PID:2026 | TTY:pts/0 ]</span>
+        <span>┘</span>
       </div>
     </div>
   )
